@@ -1,0 +1,22 @@
+.DS_Store
+	.ipynb_checkpoints/
+	LICENSE
+	README.md
+	__pycache__/
+	images/
+	neural_style.py
+	pytorch_models/
+	test.ipynb
+	transformer_net.py
+	utils.py
+	vgg.py
+
+# MacOs
+.DS_Store
+
+# 编译器
+__pycache__
+.ipynb_checkpoints
+
+# 测试文件
+test.ipynb
