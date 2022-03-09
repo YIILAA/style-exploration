@@ -31,18 +31,19 @@ class TransformerNet(torch.nn.Module):
         # Non-linearities
         self.relu = torch.nn.ReLU()
 
-    def forward(self, X, style_id):
-        # X,style_id=model_in
-        y = self.relu(self.in1(self.conv1(X), style_id))
-        y = self.relu(self.in2(self.conv2(y), style_id))
-        y = self.relu(self.in3(self.conv3(y), style_id))
+    def forward(self, X, style_id, blend=False, style_blend_weights=None):
+        # 当blend=False时，一个forward处理一个batch_size的图片，style_id列表为batch中每个图片对应的风格
+        # 当blend=True时，一个forward处理第一维=1的一张图片，style_id列表为需要融合的风格列表
+        y = self.relu(self.in1(self.conv1(X), style_id, blend, style_blend_weights))
+        y = self.relu(self.in2(self.conv2(y), style_id, blend, style_blend_weights))
+        y = self.relu(self.in3(self.conv3(y), style_id, blend, style_blend_weights))
         y = self.res1(y)
         y = self.res2(y)
         y = self.res3(y)
         y = self.res4(y)
         y = self.res5(y)
-        y = self.relu(self.in4(self.deconv1(y), style_id))
-        y = self.relu(self.in5(self.deconv2(y), style_id))
+        y = self.relu(self.in4(self.deconv1(y), style_id, blend, style_blend_weights))
+        y = self.relu(self.in5(self.deconv2(y), style_id, blend, style_blend_weights))
         y = self.deconv3(y)         
         return y
 
@@ -63,13 +64,20 @@ class ConditionalInstanceNorm2d(torch.nn.Module):
         self.embed.weight.data[:, :num_features].normal_(1, 0.02)  # 缩放参数 Initialise scale at N(1, 0.02)
         self.embed.weight.data[:, num_features:].zero_()  # 偏移参数 Initialise bias at 0
 
-    def forward(self, x, style_index):
+    def forward(self, x, style_index, blend=False, style_blend_weights=None):
         # 先经过一层普通的IN层
         # 加上一个embed层，参数为(num_classes, c * 2), 每一行匹配一种风格，前后分别表示系数和偏移
         out = self.inst_norm(x)
-        gamma, beta = self.embed(style_index).chunk(2, 1) # chunks=2, dim=1
-        # gamma, beta为处理一个batch的列表，元素的shape为(batch, c)
-        # x.shape: (batch, c, h, w), gamma/beta reshape为(batch, c, 1, 1)
+
+        # new
+        if blend: # blend=True, 风格融合，需对参数进行凸组合
+            blend_style_embedding = self.embed(style_index) * style_blend_weights.unsqueeze(dim=1) # embed行 * 每个weight
+            gamma, beta = blend_style_embedding.sum(dim=0, keepdim=True).chunk(2, 1)
+        else: # 处理一个batch的图片
+            gamma, beta = self.embed(style_index).chunk(2, 1) # chunks=2, dim=1
+            # gamma, beta为处理一个batch的列表，元素的shape为(batch, c)
+            # x.shape: (batch, c, h, w), gamma/beta reshape为(batch, c, 1, 1)
+
         out = gamma.view(-1, self.num_features, 1, 1) * out + beta.view(-1, self.num_features, 1, 1)
         return out
 

@@ -143,6 +143,7 @@ def train(args):
 
 
 def stylize(args):
+    # 修改成传入列表形式的，style_id，style_blend_weights，需要一个combine的bool型参数
     device = torch.device("cuda" if args.cuda else "cpu")
 
     content_image = utils.load_image(args.content_image, scale=args.content_scale)
@@ -151,24 +152,54 @@ def stylize(args):
         transforms.Lambda(lambda x: x.mul(255))
     ])
     content_image = content_transform(content_image)
-    content_image = content_image.unsqueeze(0).to(device)
-    style_id = torch.LongTensor([args.style_id]).to(device)
-    
+    content_image = content_image.unsqueeze(0).to(device) # 增加一个维度
+    # style_id = torch.LongTensor([args.style_id]).to(device) # 格式为列表，但仅含一个元素
+
+    # 处理style_ids
+    # 得到style_ids列表
+    style_ids = list(map(int, args.style_ids.split(',')))
+    style_ids = torch.LongTensor(style_ids).to(device)
+
+    # 处理style_blend_weights列表
+    style_blend_weights = []
+    if args.style_blend_weights == None:
+        # 未指定blend_weights，使用相同的权重
+        for i in style_ids:
+            style_blend_weights.append(1.0)
+    else:
+        # 指定，检查长度是否一致
+        style_blend_weights = list(map(float, args.style_blend_weights.split(',')))
+        assert len(style_blend_weights) == len(style_ids), \
+            "--style-blend-weights and --style-ids must have the same number of elements!"
+    # Normalize the style blending weights so they sum to 1
+    style_blend_weights = torch.Tensor(style_blend_weights)
+    style_blend_weights /= torch.sum(style_blend_weights)
+    style_blend_weights = style_blend_weights.to(device)
+
     with torch.no_grad():
         import time
         start = time.time()
+        # 加载模型
         style_model = TransformerNet(style_num=args.style_num)
         state_dict = torch.load(args.model)
         style_model.load_state_dict(state_dict)
         style_model.to(device)
-        output = style_model(content_image, style_id).cpu()
+        # forward
+        output = style_model(content_image, style_ids, blend=True, style_blend_weights=style_blend_weights).cpu() # 修改模型处理 需要融合的forward
         end = time.time()
         print('Time={}'.format(end - start))
+    '''
     if args.export_onnx:
         assert args.export_onnx.endswith(".onnx"), "Export model file should end with .onnx"
         output = torch.onnx._export(style_model, [content_image_t,style_t], args.export_onnx, input_names=['input_image','style_index'], output_names=['output_image']).cpu()
+    '''
 
-    utils.save_image('output/'+args.output_image+'_style'+str(args.style_id)+'.jpg', output[0])
+    # save
+    output_image_dir = 'images/output_images/'
+    output_image_name = args.output_image+ '_style'+str(args.style_ids)
+    if args.style_blend_weights is not None:
+        output_image_name += '_weight'+str(args.style_blend_weights)
+    utils.save_image(output_image_dir + output_image_name +'.jpg', output[0])
 
 def main():
     main_arg_parser = argparse.ArgumentParser(description="parser for fast-neural-style")
@@ -218,8 +249,15 @@ def main():
                                  help="saved model to be used for stylizing the image. If file ends in .pth - PyTorch path is used, if in .onnx - Caffe2 path")
     eval_arg_parser.add_argument("--cuda", type=int, required=True,
                                  help="set it to 1 for running on GPU, 0 for CPU")
+    '''
     eval_arg_parser.add_argument("--style-id", type=int, required = True,
                                  help="style number id corresponding to the order in training")
+    '''
+    # new
+    eval_arg_parser.add_argument("--style-ids",
+                                help="style number id corresponding to the order in training, could be more than one id split by ','")
+    eval_arg_parser.add_argument("--style-blend-weights", 
+                                help="")
     eval_arg_parser.add_argument("--batch-size", type=int, default=4,
                                   help="batch size for testing, default is 4")
     eval_arg_parser.add_argument("--style-num", type=int, default=4,
